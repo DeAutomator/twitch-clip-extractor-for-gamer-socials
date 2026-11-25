@@ -1,0 +1,84 @@
+
+name: Twitch Clip Extractor
+
+on:
+  workflow_dispatch:
+    inputs:
+      clip_url:
+        description: "Twitch Clip URL"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+
+    steps:
+      - name: Install yt-dlp
+        run: |
+          python3 -m pip install --upgrade yt-dlp
+          yt-dlp --version
+
+      - name: Extract Direct Download URL
+        env:
+          CLIP_URL: ${{ inputs.clip_url }}
+
+        run: |
+          python3 <<'PY'
+          import os
+          import json
+          import time
+          import re
+          from urllib.parse import urlparse
+          import yt_dlp
+
+          clip_url = os.environ["CLIP_URL"]
+          start = time.perf_counter()
+
+          parsed = urlparse(clip_url)
+
+          valid = parsed.scheme == "https" and (
+              (parsed.hostname == "clips.twitch.tv"
+               and re.fullmatch(r"/[\w-]+/?", parsed.path))
+              or
+              (parsed.hostname in ("www.twitch.tv", "twitch.tv")
+               and re.fullmatch(r"/[\w]+/clip/[\w-]+/?", parsed.path))
+          )
+
+          if not valid:
+              raise ValueError("Invalid Twitch clip URL")
+
+          options = {
+              "format": "best[ext=mp4]",
+              "quiet": True,
+              "no_warnings": True,
+              "skip_download": True,
+              "noplaylist": True,
+              "socket_timeout": 15,
+              "retries": 1
+          }
+
+          with yt_dlp.YoutubeDL(options) as ydl:
+              info = ydl.extract_info(
+                  clip_url,
+                  download=False
+              )
+
+          result = {
+              "success": True,
+              "download_url": info["url"],
+              "duration": info.get("duration"),
+              "width": info.get("width"),
+              "height": info.get("height"),
+              "fps": info.get("fps"),
+              "extraction_time": round(
+                  time.perf_counter() - start, 3
+              )
+          }
+
+          print("RESULT_START" + json.dumps(result) + "RESULT_END")
+          PY
